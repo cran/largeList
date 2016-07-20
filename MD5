@@ -1,0 +1,13 @@
+2ecc1a58e07380e8d4df0589df2a335b *DESCRIPTION
+21024f8363bd3c710823dd9595d321ee *NAMESPACE
+50a7b9d50c0cd0c6eead3dd9d53d7ba9 *R/Exports.R
+358eaa910991daf3cdb95491ec674b6b *man/largeList.Rd
+7e811bf29cefcb3679f93bc0c6f66de9 *src/getListLength.cpp
+809a99bd3df3c60be5b210691e0878fe *src/getListName.cpp
+2bd3a1703225d9b0334f7165d6216019 *src/largeList.h
+a7a9411d3b637143dca9df335b06709e *src/readList.cpp
+70a423ad3999ccc2c77c788afa5a2ea9 *src/readObject.cpp
+c867499fb5a74aeac6353cfb6286d26d *src/removeFromList.cpp
+8514d0ba5a299bc2f89284a3ab4c6344 *src/saveList.cpp
+ae6b145790a99aa41f157e7eb8136515 *src/utils.cpp
+0295e3be50ba73b542c9b4c6ef6b10ec *src/writeObject.cpp
