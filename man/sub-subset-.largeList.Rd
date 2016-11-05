@@ -9,7 +9,7 @@
 \arguments{
 \item{x}{A largeList object created by \code{\link{getList}}.}
 
-\item{index}{\code{NULL}, a numeric vector or a character vecter.}
+\item{index}{\code{NULL} or a numeric, character vector with length 1.}
 
 \item{value}{\code{NULL}, a vector or a list.}
 }
@@ -21,6 +21,15 @@ It behaviours the same as a normal list object. If index is not provided, the li
 binding with the largeList object will be truncated and elements in
 value will be saved to the list file. If value is \code{NULL}, element with given index 
 will be removed.
+}
+\examples{
+largelist_object <- getList("example.llo", truncate = TRUE)
+largelist_object[[]] <- list("A" = 1, "B" = 2, "C" = 3)  ## assign list to the list file
+largelist_object[[1]] <- NULL ## remove first element
+largelist_object[["B"]] <- NULL ## remove element with name "B"
+largelist_object[["C"]] <- 5 ## change value
+largelist_object[[2]] <- 5 ## change value
+largelist_object[[4]] <- 6 ## append 6 to 4th and NULL to 3rd position
 }
 \seealso{
 \code{\link{largeList}}
