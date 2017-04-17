@@ -28,12 +28,12 @@ namespace large_list {
 		}
 		if (TYPEOF(index) == INTSXP ||  TYPEOF(index) == REALSXP) {
 			length_ = Rf_length(index);
-  			index_.resize(length_);
-  			TYPEOF(index) == INTSXP ?
-  				index_.assign(INTEGER(index), INTEGER(index) + length_) :
-  				index_.assign(REAL(index), REAL(index) + length_);
-  			try {processNumeric(); } catch (std::exception &e){ connection_file.disconnect(); error(e.what());}
-  			// Rprintf("index size : %d, length_ : %d\n", index_.size(), length_);
+			index_.resize(length_);
+			TYPEOF(index) == INTSXP ?
+				index_.assign(INTEGER(index), INTEGER(index) + length_) :
+				index_.assign(REAL(index), REAL(index) + length_);
+			try {processNumeric(); } catch (std::exception &e){ connection_file.disconnect(); error(e.what());}
+			// Rprintf("index size : %d, length_ : %d\n", index_.size(), length_);
 		}
 		if (TYPEOF(index) == STRSXP) {
 			length_ = Rf_length(index);
@@ -70,7 +70,7 @@ namespace large_list {
 		while (left <= right) {
 			mid =  (left + right) / 2;
 			connection_file.seekRead(-(8 + NAMELENGTH) * length + mid * (8 + NAMELENGTH) + 8, SEEK_END);
-			connection_file.read((char*) & (current_name[0]), NAMELENGTH , 1);
+			connection_file.read(&current_name[0], NAMELENGTH , 1);
 			// Rprintf("%d \n", current_name.size());
 			// Rprintf("%d \n", name.size());
 			// Rprintf("mid is %d \n", mid);
@@ -79,7 +79,7 @@ namespace large_list {
 			if (current_name == name) {
 				index = mid;
 				connection_file.seekRead(-(8 + NAMELENGTH) * length + mid * (8 + NAMELENGTH), SEEK_END);
-				connection_file.read((char*) & (position), 8, 1);
+				connection_file.read(&position, 8, 1);
 				return;
 			} else if (current_name > name) {
 				right = mid - 1;
@@ -104,7 +104,7 @@ namespace large_list {
 		while (left <= right) {
 			mid = (left + right) / 2;
 			connection_file.seekRead(-2 * (8 + NAMELENGTH) * length - 8 + mid * (8 + NAMELENGTH), SEEK_END);
-			connection_file.read((char*) & (current_position), 8, 1);
+			connection_file.read(&current_position, 8, 1);
 			if (current_position == position) {
 				index = mid;
 				return;

@@ -15,13 +15,16 @@ namespace large_list {
 
 	void MetaListObject::writeLength (ConnectionFile & connection_file) {
 		connection_file.seekWrite(LENGTH_POSITION, SEEK_SET);
-		connection_file.write((char *) & (length_), 4, 1);
+		connection_file.write(&length_, 4, 1);
 		return;
 	}
 
 	void MetaListObject::readLength (ConnectionFile & connection_file) {
 		connection_file.seekRead(LENGTH_POSITION, SEEK_SET);
-		connection_file.read((char *) & (length_), 4, 1);
+		connection_file.read(&length_, 4, 1);
+		if (length_ < 0) {
+			error("unkown file format!");
+		}		
 		return;
 	}
 
@@ -36,13 +39,13 @@ namespace large_list {
 
 	void MetaListObject::writeNameBit (ConnectionFile & connection_file) {
 		connection_file.seekWrite(HAS_NAME_POSITION, SEEK_SET);
-		connection_file.write((char *) & (has_name_), 1, 1);
+		connection_file.write(&has_name_, 1, 1);
 		return;
 	}
 
 	void MetaListObject::readNameBit (ConnectionFile & connection_file) {
 		connection_file.seekRead(HAS_NAME_POSITION, SEEK_SET);
-		connection_file.read((char *) & (has_name_), 1, 1);
+		connection_file.read(&has_name_, 1, 1);
 		return;
 	}
 
@@ -57,13 +60,13 @@ namespace large_list {
 
 	void MetaListObject::writeCompressBit (ConnectionFile & connection_file) {
 		connection_file.seekWrite(IS_COMPRESS_POSITION, SEEK_SET);
-		connection_file.write((char *) & (is_compress_), 1, 1);
+		connection_file.write(&is_compress_, 1, 1);
 		return;
 	}
 
 	void MetaListObject::readCompressBit (ConnectionFile & connection_file) {
 		connection_file.seekRead(IS_COMPRESS_POSITION, SEEK_SET);
-		connection_file.read((char *) & (is_compress_), 1, 1);
+		connection_file.read(&is_compress_, 1, 1);
 		return;
 	}
 
@@ -79,8 +82,8 @@ namespace large_list {
 	//write list head
 	void MetaListObject::writeListHead (ConnectionFile & connection_file) {
 		connection_file.seekWrite(LIST_HEAD_POSITION, SEEK_SET);
-		std::string list_head("\x13\x00\x00\x00");
-		connection_file.write((char *)list_head.c_str(), 1, 4);
+		char list_head[5] ="\x13\x00\x00\x00";
+		connection_file.write(&list_head[0], sizeof(char), 4);
 		return;
 	}
 
@@ -122,6 +125,7 @@ namespace large_list {
 		if (name_sxp == R_NilValue) {
 			has_name_ = false;
 			for (int i = 0; i < length_; i++) {
+				names_[i].resize(NAMELENGTH);
 				names_[i].assign(NAMELENGTH, '\xff');
 			}
 		} else {
@@ -145,15 +149,15 @@ namespace large_list {
 		return;
 	}
 
-	void ListObject::write(ConnectionFile & connection_file, int index) {
+	void ListObject::write(ConnectionFile & connection_file, MemorySlot & memory_slot, int index) {
 		UnitObject unit_object(VECTOR_ELT(r_list_, index));
-		serialized_length_[index] = unit_object.write(connection_file, is_compress_);
+		serialized_length_[index] = unit_object.write(connection_file, memory_slot, is_compress_);
 		return;
 	}
 
-	void ListObject::read(ConnectionFile & connection_file, int index) {
+	void ListObject::read(ConnectionFile & connection_file, MemorySlot & memory_slot, int index) {
 		UnitObject unit_object;
-		unit_object.read(connection_file, serialized_length_[index], is_compress_);
+		unit_object.read(connection_file, memory_slot, serialized_length_[index], is_compress_);
 		SET_VECTOR_ELT(r_list_, index, unit_object.get());
 		return;
 	}
@@ -200,11 +204,14 @@ namespace large_list {
 	}
 
 	// get the serialized lengths of all objects in the list.
-	void ListObject::calculateSerializedLength () {
+	void ListObject::calculateSerializedLength (MemorySlot & memoryslot) {
+		large_list::ProgressReporter calculate_reporter;
 		for (int i = 0; i < length_; i ++) {
 			UnitObject unit_object(VECTOR_ELT(r_list_, i));
-			serialized_length_[i] = unit_object.calculateSerializedLength(is_compress_);
+			serialized_length_[i] = unit_object.calculateSerializedLength(memoryslot, is_compress_);
 			// Rprintf("LENGTH %3.0ld \n", serialized_length_[i]);
+			// Print progress to console
+			calculate_reporter.reportProgress(i, length_, "Calculate Serialized Length");
 		}
 		return;
 	}
@@ -219,14 +226,14 @@ namespace large_list {
 
 	void ListObject::print() {
 		Rprintf("Length %d, Has_name %s, Is_compress %s \n",
-		        length_,
-		        has_name_ ? "true" : "false",
-		        is_compress_ ? "true" : "false");
+				length_,
+				has_name_ ? "true" : "false",
+				is_compress_ ? "true" : "false");
 		for (int i = 0; i < length_; i++) {
 			Rprintf("index %d, serialized_length_ %lf, name %s \n",
-			        i,
-			        (double) serialized_length_[i],
-			        names_[i].c_str());
+					 i,
+					(double) serialized_length_[i],
+					names_[i].c_str());
 		}
 	}
 }

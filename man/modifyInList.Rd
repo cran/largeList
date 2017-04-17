@@ -23,15 +23,24 @@ Modify elements in a list file.
 It modifies elements with given indices by replacement values provided in parameter object. If length 
 of replacement values is shorter than length of indices, values will be used circularly. This function may 
 relocate all the data in the stored file, thus can be very slow! Please consider to call this
-function batchwise instead of one by one.
+function batchwise instead of one by one. \cr
+When it takes long time to process, some verbose info will be printed to console, 
+which can be switched off by setting \code{options(list(largeList.report.progress = FALSE))}.
 }
 \examples{
-list1 <- list("A" = c(1,2), "B" = "abc", list(1, 2, 3))
-saveList(list1, "example.llo")
-modifyInList("example.llo", c(1,2), list("AA","BB"))
-modifyInList("example.llo", c("AA","BB"), list("A","B"))
+list_1 <- list("A" = c(1,2), "B" = "abc", list(1, 2, 3))
+saveList(object = list_1, file = "example.llo")
+
+# by numeric indices
+modifyInList(file = "example.llo", index = c(1,2), object = list("AA","BB"))
+
+# by names
+modifyInList(file = "example.llo", index = c("AA","BB"), object = list("A","B"))
+
+# by logical indices
+modifyInList(file = "example.llo", index = c(TRUE, FALSE, TRUE), object = list("A","B"))
+
 }
 \seealso{
 \code{\link{largeList}}
 }
-

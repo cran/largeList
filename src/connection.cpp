@@ -31,7 +31,7 @@ namespace large_list {
 	void ConnectionFile::connect() {
 		fout_ = std::fopen(file_dir_name_, "r+b");
 		if (fout_ == NULL) {
-			throw std::runtime_error("file does not exist.");
+			throw std::runtime_error("file does not exist or insufficient privilege.");
 		}
 		fin_ = std::fopen(file_dir_name_, "rb");
 		checkVersion();
@@ -46,7 +46,7 @@ namespace large_list {
 	}
 	
 	//safe write
-	void ConnectionFile::write(char *data, int nbytes, int nblocks) {
+	void ConnectionFile::write(const void *data, int nbytes, int nblocks) {
 		int64_t initial_ptr_position = std::ftell(fout_);
 		int retries = 0;
 		while (((int)std::fwrite(data, nbytes, nblocks, fout_) != nblocks) && (retries < MAXRETRIES)) {
@@ -54,14 +54,15 @@ namespace large_list {
 			retries ++;
 		}
 		if (retries == MAXRETRIES) {
-			throw std::runtime_error("fwrite failed!");
+			disconnect();
+			error("fwrite failed, file might be broken!");
 		}
 		return;
 	}
 
 
 	//safe fread
-	void ConnectionFile::read(char *data, int nbytes, int nblocks) {
+	void ConnectionFile::read(void *data, int nbytes, int nblocks) {
 		int64_t initial_ptr_position = std::ftell(fin_);
 		int retries = 0;
 		while (((int)std::fread(data, nbytes, nblocks, fin_) != nblocks) && (retries < MAXRETRIES)) {
@@ -69,7 +70,8 @@ namespace large_list {
 			retries ++;
 		}
 		if (retries == MAXRETRIES) {
-			throw std::runtime_error("fread failed!");
+			disconnect();
+			error("fread failed, file might be broken!");
 		}
 		return;
 	}
@@ -90,20 +92,20 @@ namespace large_list {
 
 	int64_t ConnectionFile::tellWrite() {
 		return(std::ftell(fout_));
-	}	
+	}
 
 	//writeVersion
 	void ConnectionFile::writeVersion () {
-		std::string head("LARGELIST ");
-		write((char*)head.c_str(), 1, 10);
+		char head[11] = "LARGELIST ";
+		write(&head[0], 1, 10);
 		int current_version = CURRENT_VERSION;
 		int readable_version = READABLE_VERSION;
-		write((char *)&current_version, 1, 4);
-		write((char *)&readable_version, 1, 4);
-		int has_name = 0;
-		write((char *)&has_name, 1, 1);
-		std::string reserved_string(7, '\x00');
-		write((char*)reserved_string.c_str(), 1, 7);
+		write(&current_version, 4, 1);
+		write(&readable_version, 4, 1);
+		bool has_name = false;
+		write(&has_name, 1, 1);
+		char reserved_string[8] = "\x00\x00\x00\x00\x00\x00\x00";
+		write(&reserved_string[0], 1, 7);
 		return;
 	}
 
@@ -112,14 +114,14 @@ namespace large_list {
 		std::fseek(fin_, 0, SEEK_END);
 		int64_t length_of_file = std::ftell(fin_);
 		if (length_of_file < 26) { throw std::runtime_error("unkown file format!"); }
-		std::string right_head("LARGELIST ");
-		std::string head(10, '\x00');
+		char right_head[11] = "LARGELIST ";
+		char head[11];
 		std::fseek(fin_, 0, SEEK_SET);
-		read((char *)&head[0], 1, 10);
-		if (right_head.compare(head) != 0) { throw std::runtime_error("unkown file format!"); }
+		read(&head[0], 1, 10); head[10] = '\0';
+		if (strcmp(head, right_head) != 0) { throw std::runtime_error("unkown file format!"); }
 		std::fseek(fin_, 10, SEEK_SET);
 		int current_version;
-		read((char *)&current_version, 4, 1);
+		read(&current_version, 4, 1);
 		if (current_version < READABLE_VERSION) {
 			std::ostringstream msg;
 			msg << "can only read files created by version above " 
@@ -138,7 +140,8 @@ namespace large_list {
 #if defined PREDEF_PLATFORM_UNIX
 		// Rprintf("Begin to truncate \n");
 		if (truncate(file_dir_name_, file_length) != 0) {
-			throw std::runtime_error("file truncation failed (Unix).");
+			disconnect();
+			error("file truncation failed (Unix).");
 		}
 		// Rprintf("Truncate finished \n");
 #endif
@@ -150,12 +153,12 @@ namespace large_list {
 		HANDLE fh;
 		do {
 			fh = CreateFile((LPCTSTR)file_dir_name_,
-			                GENERIC_WRITE, // open for write
-			                0,
-			                NULL, // default security
-			                OPEN_EXISTING, // existing file only
-			                FILE_ATTRIBUTE_NORMAL, // normal file
-			                NULL);
+							GENERIC_WRITE, // open for write
+							0,
+							NULL, // default security
+							OPEN_EXISTING, // existing file only
+							FILE_ATTRIBUTE_NORMAL, // normal file
+							NULL);
 			if (fh == INVALID_HANDLE_VALUE) {
 				DWORD last_error = GetLastError();
 				if (ERROR_SHARING_VIOLATION == last_error) {
@@ -163,11 +166,12 @@ namespace large_list {
 					Sleep(RETRYDELAY);
 					continue;
 				} else {
-				  char error_info[200];
-				  sprintf(error_info, 
-                  "file truncation failed (Windows), get file handle error. Error Code %ld .", 
-                  last_error);
-					throw std::runtime_error(error_info);
+					char error_info[200];
+					sprintf(error_info, 
+					"file truncation failed (Windows), get file handle error. Error Code %ld .", 
+					last_error);
+					disconnect();
+					error(error_info);
 				}
 			}
 			break;
@@ -179,11 +183,12 @@ namespace large_list {
 		SetFilePointerEx(fh, file_length_w, NULL, 0);
 		if (SetEndOfFile(fh) == 0) {
 			DWORD last_error = GetLastError();
-		  char error_info[200];
-		  sprintf(error_info, 
-            "file truncation failed (Windows), Error Code %ld .", 
-            last_error);
-		  throw std::runtime_error(error_info);
+			char error_info[200];
+			sprintf(error_info, 
+					"file truncation failed (Windows), Error Code %ld .", 
+					last_error);
+			disconnect();
+			error(error_info);
 		}
 		CloseHandle(fh);
 #endif
@@ -194,14 +199,13 @@ namespace large_list {
 	void ConnectionFile::moveData(const int64_t &move_from_start_pos, const int64_t &move_from_end_pos,
 	const int64_t &move_to_start_pos, const int64_t &move_to_end_pos) {
 		if (move_from_end_pos - move_from_start_pos != move_to_end_pos - move_to_start_pos) {return;}
-		BYTE *to_move_raw = (BYTE *) std::malloc((move_from_end_pos - move_from_start_pos) * sizeof(BYTE));
-		// std::vector<BYTE> to_move_raw(move_from_end_pos - move_from_start_pos);
+		void *to_move_raw = (void *) std::malloc((move_from_end_pos - move_from_start_pos));
 		seekRead(move_from_start_pos, SEEK_SET);
 		// Rprintf("to read");
-		read((char*) & (to_move_raw[0]), 1, move_from_end_pos - move_from_start_pos);
+		read(to_move_raw, 1, move_from_end_pos - move_from_start_pos);
 		seekWrite(move_to_start_pos, SEEK_SET);
 		// Rprintf("to write");
-		write((char*) & (to_move_raw[0]), 1, move_to_end_pos - move_to_start_pos);
+		write(to_move_raw, 1, move_to_end_pos - move_to_start_pos);
 		std::free(to_move_raw);
 		return;
 	}
@@ -209,15 +213,18 @@ namespace large_list {
 
 //-----------------------------------------  Connection Raw ---------------------------------//
 
-	ConnectionRaw::ConnectionRaw(int64_t length) {
-		raw_array_ = (char*) std::malloc (length);
+	ConnectionRaw::ConnectionRaw(MemorySlot & memory_slot, int64_t length) {
+		raw_array_ = memory_slot.slot_malloc(length);
 		length_ = length;
 		read_pos_ = 0;
 		write_pos_ = 0;
 	}
 	
 	ConnectionRaw::~ConnectionRaw() {
-		std::free(raw_array_);
+	}
+
+	void ConnectionRaw::free(MemorySlot & memory_slot) {
+		memory_slot.slot_free(raw_array_);
 	}
 
 	void ConnectionRaw::seekRead(int64_t position, int origin) {
@@ -246,22 +253,22 @@ namespace large_list {
 		return;
 	}
 
-	void ConnectionRaw::read(char *data, int nbytes, int nblocks) {
-		std::memcpy(data, &raw_array_[read_pos_], nbytes * nblocks);
+	void ConnectionRaw::read(void *data, int nbytes, int nblocks) {
+		std::memcpy(data, (char*)raw_array_ + read_pos_, nbytes * nblocks);
 		read_pos_ += nbytes * nblocks;
 		return;
 	}
 
-	void ConnectionRaw::write(char *data, int nbytes, int nblocks) {
-		std::memcpy(&raw_array_[write_pos_], data, nbytes * nblocks);
+	void ConnectionRaw::write(const void *data, int nbytes, int nblocks) {
+		std::memcpy((char*)raw_array_ + write_pos_, data, nbytes * nblocks);
 		write_pos_ += nbytes * nblocks;
 		return;
 	}
 
-	void ConnectionRaw::compress() {
-		char * raw_array_compressed;
+	void ConnectionRaw::compress(MemorySlot & memory_slot) {
+		void * raw_array_compressed;
 		int64_t compress_bound = compressBound(length_);
-		raw_array_compressed = (char*) std::malloc (compress_bound);
+		raw_array_compressed = memory_slot.slot_malloc(compress_bound);
 		int res;
 
 		z_stream strm;
@@ -277,21 +284,21 @@ namespace large_list {
 		// Rprintf("Before Compress %ld \n", length_);
 		deflateInit(&strm, Z_DEFAULT_COMPRESSION);
 		res = deflate(&strm, Z_FINISH);
-		if (res != Z_STREAM_END) {throw std::runtime_error("internal error in compress");}
+		if (res != Z_STREAM_END) {error("internal error in compress");}
 		int64_t length_after_compress = compress_bound - strm.avail_out;
 		// Rprintf("After Compress %ld \n", length_after_compress);
 		deflateEnd(&strm);
 
-		std::free(raw_array_);
+		memory_slot.slot_free(raw_array_);
 		raw_array_  = raw_array_compressed;
 		length_ = length_after_compress;
 		return;
 	}
 
-	void ConnectionRaw::uncompress() {
-		char * raw_array_uncompressed;
+	void ConnectionRaw::uncompress(MemorySlot & memory_slot) {
+		void * raw_array_uncompressed;
 		int64_t uncompress_bound = 3 * length_;
-		raw_array_uncompressed = (char*) std::malloc (uncompress_bound);
+		raw_array_uncompressed = memory_slot.slot_malloc(uncompress_bound);
 		int res;
 
 		z_stream strm;
@@ -312,7 +319,7 @@ namespace large_list {
 			if (res == Z_BUF_ERROR) {
 				// Rprintf("uncompress_bound %ld \n", uncompress_bound);
 				uncompress_bound *= 2;
-				raw_array_uncompressed = (char *) realloc(raw_array_uncompressed, uncompress_bound);
+				raw_array_uncompressed = memory_slot.slot_realloc(raw_array_uncompressed, uncompress_bound);
 				continue;
 			}
 			if (res == Z_STREAM_END) {break;}
@@ -323,13 +330,13 @@ namespace large_list {
 		// Rprintf("After Uncompress %ld \n", length_after_uncompress);
 		inflateEnd(&strm);
 
-		std::free(raw_array_);
+		memory_slot.slot_free(raw_array_);
 		raw_array_  = raw_array_uncompressed;
 		length_ = length_after_uncompress;
 		return;
 	}
 
-	char* ConnectionRaw::getRaw() {
+	void* ConnectionRaw::getRaw() {
 		return raw_array_;
 	}
 

@@ -14,6 +14,8 @@
 #endif
 
 #include <stdint.h>
+#include <time.h>
+#include <cstring>
 #include <stdexcept>
 #include <math.h>
 #include <fstream>
@@ -26,9 +28,12 @@
 #include <Rinternals.h>
 #include <zlib.h>
 
-#define BYTE unsigned char
+#define BYTES_MASK (1<<1)
+#define LATIN1_MASK (1<<2)
+#define UTF8_MASK (1<<3)
+
 #define NAMELENGTH 16
-#define CURRENT_VERSION ((0<<8) + (3<<4) + 0)
+#define CURRENT_VERSION ((0<<8) + (3<<4) + 1)
 #define READABLE_VERSION ((0<<8) + (2<<4) + 1)
 #define LIST_HEAD_POSITION 26
 #define LENGTH_POSITION 30
@@ -36,6 +41,7 @@
 #define RETRYDELAY  250
 #define HAS_NAME_POSITION 18
 #define IS_COMPRESS_POSITION 19
+#define NUMBER_OF_MEM_SLOTS 100
 
 
 namespace large_list {
@@ -45,31 +51,33 @@ namespace large_list {
 	class ListObject;
 	class NamePositionTuple;
 	class IndexWithValueObject;
+	class MemorySlot;
 
 	class Connection {
 	public:
-		virtual void write(char *data, int nbytes, int nblocks) = 0;
-		virtual void read(char *data, int nbytes, int nblocks) = 0;
+		virtual void write(const void *data, int nbytes, int nblocks) = 0;
+		virtual void read(void *data, int nbytes, int nblocks) = 0;
 		virtual void seekRead(int64_t position, int origin) = 0;
 		virtual void seekWrite(int64_t position, int origin) = 0;
 	};
 
 	class ConnectionRaw : public Connection {
 	private:
-		char *raw_array_;
+		void* raw_array_;
 		int64_t read_pos_;
 		int64_t write_pos_;
 		int64_t length_;
 	public:
-		ConnectionRaw(int64_t length);
+		ConnectionRaw(MemorySlot &, int64_t length);
 		~ConnectionRaw();
-		void write(char *data, int nbytes, int nblocks);
-		void read(char *data, int nbytes, int nblocks);
+		void write(const void *data, int nbytes, int nblocks);
+		void read(void *data, int nbytes, int nblocks);
 		void seekRead(int64_t position, int origin);
 		void seekWrite(int64_t position, int origin);
-		void compress();
-		void uncompress();
-		char* getRaw();
+		void compress(MemorySlot &);
+		void uncompress(MemorySlot &);
+		void free(MemorySlot &);
+		void* getRaw();
 		int64_t getLength();
 	};
 
@@ -93,8 +101,8 @@ namespace large_list {
 		void disconnect();
 
 		// wrapper for fwrite and fread, gets rid of warnings and handles exceptions.
-		void write(char *data, int nbytes, int nblocks);
-		void read(char *data, int nbytes, int nblocks);
+		void write(const void *data, int nbytes, int nblocks);
+		void read(void *data, int nbytes, int nblocks);
 
 		// set/read the pointers.
 		void seekRead(int64_t position, int origin);
@@ -108,8 +116,8 @@ namespace large_list {
 		// move a data block.
 		void moveData(const int64_t &move_from_start_pos, 
 					  const int64_t &move_from_end_pos,
-		              const int64_t &move_to_start_pos, 
-		              const int64_t &move_to_end_pos);
+					  const int64_t &move_to_start_pos, 
+					  const int64_t &move_to_end_pos);
 	};
 
 	class UnitObject {
@@ -124,10 +132,10 @@ namespace large_list {
 
 		// operations to the R object.
 		void set(SEXP r_object);
-		int64_t write(ConnectionFile & connection_file, bool is_compress);
-		void read(ConnectionFile & connection_file, int64_t serialized_length, bool is_compress);
+		int64_t write(ConnectionFile & connection_file, MemorySlot &, bool is_compress);
+		void read(ConnectionFile & connection_file, MemorySlot &, int64_t serialized_length, bool is_compress);
 		SEXP get();
-		int64_t calculateSerializedLength(bool is_compress);
+		int64_t calculateSerializedLength(MemorySlot &, bool is_compress);
 		void check();	
 
 		// the following functions deal with the input/output/check/serialized length of R object.
@@ -194,7 +202,7 @@ namespace large_list {
 		void resize(int length);
 
 		// serialized length
-		void calculateSerializedLength();
+		void calculateSerializedLength(MemorySlot & memoryslot);
 		void setSerializedLength(int64_t serialized_length, int index);
 		int64_t getSerializedLength(int index);
 
@@ -206,8 +214,8 @@ namespace large_list {
 
 		// list of UnitObject
 		void check();
-		void write(ConnectionFile & connection_file, int index);
-		void read(ConnectionFile & connection_file, int index);
+		void write(ConnectionFile &, MemorySlot &, int index);
+		void read(ConnectionFile &, MemorySlot &, int index);
 		void set(SEXP r_object, int index);
 
 		// other
@@ -261,7 +269,7 @@ namespace large_list {
 		void sort();
 		void remove(IndexObject & index_object);
 		static bool cmp (std::tuple<int64_t, int64_t, std::string>  const & a, 
-		                 std::tuple<int64_t, int64_t, std::string>  const & b);
+						 std::tuple<int64_t, int64_t, std::string>  const & b);
 
 		// other
 		void setToInvalid(int index);
@@ -343,10 +351,37 @@ namespace large_list {
 		static bool cmp (std::pair<int, int> const & a, std::pair<int, int> const & b);
 	};
 
-	extern "C" SEXP saveList(SEXP object, SEXP file, SEXP append, SEXP compress);
-	extern "C" SEXP readList(SEXP file, SEXP index);
-	extern "C" SEXP removeFromList(SEXP file, SEXP index);
-	extern "C" SEXP modifyInList(SEXP file, SEXP index, SEXP object);
+	class ProgressReporter{
+	private:
+		clock_t clock_begin_;
+		clock_t clock_end_;
+		int estimated_sec_times_;
+	public:
+		bool is_long_time_;
+		ProgressReporter();
+		void reportProgress(int, int, std::string);
+		void reportFinish(std::string);
+		void clearLine();
+	};
+
+	class MemorySlot{
+	private:
+		bool is_slot_in_use[NUMBER_OF_MEM_SLOTS];
+		bool is_slot_initialized[NUMBER_OF_MEM_SLOTS];
+		int64_t slot_size[NUMBER_OF_MEM_SLOTS];
+		void *slot[NUMBER_OF_MEM_SLOTS];
+	public:
+		MemorySlot();
+		~MemorySlot();
+		void* slot_malloc(int64_t);
+		void slot_free(void *);
+		void* slot_realloc(void*, int64_t);
+	};
+
+	extern "C" SEXP saveList(SEXP object, SEXP file, SEXP append, SEXP compress, SEXP verbose);
+	extern "C" SEXP readList(SEXP file, SEXP index, SEXP verbose);
+	extern "C" SEXP removeFromList(SEXP file, SEXP index, SEXP verbose);
+	extern "C" SEXP modifyInList(SEXP file, SEXP index, SEXP object, SEXP verbose);
 	extern "C" SEXP getListLength(SEXP file);
 	extern "C" SEXP getListName(SEXP file);
 	extern "C" SEXP modifyNameInList(SEXP file, SEXP index, SEXP names);
